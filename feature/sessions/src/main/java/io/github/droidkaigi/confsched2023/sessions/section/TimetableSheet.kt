@@ -1,6 +1,9 @@
 package io.github.droidkaigi.confsched2023.sessions.section
 
+import androidx.compose.animation.core.AnimationState
+import androidx.compose.animation.core.animateDecay
 import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,6 +21,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollDispatcher
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import io.github.droidkaigi.confsched2023.model.DroidKaigi2023Day
 import io.github.droidkaigi.confsched2023.model.TimetableItem
@@ -142,6 +146,18 @@ class TimetableSheetContentScrollState(
         ): Offset {
             return onPostScrollSheetContent(available)
         }
+
+        override suspend fun onPreFling(available: Velocity): Velocity {
+            println("*** Sheet onPreFling velocity=$available")
+            val superConsumed = super.onPreFling(available)
+            return superConsumed + onPreFlingSheetContent(available)
+        }
+
+        override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+            println("*** Sheet onPostFling velocity=$available")
+            val superConsumed = super.onPostFling(consumed, available)
+            return superConsumed + onPostFlingSheetContent(available)
+        }
     }
 
     /**
@@ -172,5 +188,51 @@ class TimetableSheetContentScrollState(
         } else {
             Offset.Zero
         }
+    }
+
+    private suspend fun onPreFlingSheetContent(availableScrollVelocity: Velocity): Velocity {
+        if (availableScrollVelocity.y >= 0) return Velocity.Zero
+
+        return if (tabScrollState.isTabExpandable) {
+            val remainingVelocity = settleScrollOffset(
+                initialVelocity = availableScrollVelocity.y,
+                isFinished = { !tabScrollState.isTabExpandable }
+            )
+            Velocity(0f, remainingVelocity)
+        } else {
+            Velocity.Zero
+        }
+    }
+
+    private suspend fun onPostFlingSheetContent(availableScrollVelocity: Velocity): Velocity {
+        if (availableScrollVelocity.y <= 0) return Velocity.Zero
+
+        return if (tabScrollState.isTabCollapsing) {
+            val remainingVelocity = settleScrollOffset(
+                initialVelocity = availableScrollVelocity.y,
+                isFinished = { !tabScrollState.isTabCollapsing },
+            )
+            Velocity(0f, remainingVelocity)
+        } else {
+            Velocity.Zero
+        }
+    }
+
+    private suspend fun settleScrollOffset(
+        initialVelocity: Float,
+        isFinished: (Float) -> Boolean = { false },
+    ): Float {
+        var remainingVelocity = initialVelocity
+        AnimationState(
+            initialValue = tabScrollState.scrollOffset,
+            initialVelocity = initialVelocity,
+        )
+            .animateDecay(exponentialDecay(absVelocityThreshold = 10f)) {
+                println("*** Sheet value=$value velocity=${this.velocity}")
+                tabScrollState.onScroll(value)
+                remainingVelocity = this.velocity
+                if (isFinished(value)) this.cancelAnimation()
+            }
+        return remainingVelocity
     }
 }

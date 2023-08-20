@@ -50,6 +50,7 @@ import androidx.compose.ui.semantics.verticalScrollAxisRange
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import io.github.droidkaigi.confsched2023.designsystem.preview.MultiLanguagePreviews
 import io.github.droidkaigi.confsched2023.designsystem.preview.MultiThemePreviews
@@ -173,7 +174,7 @@ fun TimetableGrid(
                     },
                     onDragEnd = {
                         coroutineScope.launch {
-                            scrollState.flingIfPossible()
+                            scrollState.flingIfPossible(nestedScrollDispatcher)
                         }
                     },
                 )
@@ -433,19 +434,30 @@ class ScreenScrollState(
         }
     }
 
-    suspend fun flingIfPossible() = coroutineScope {
+    suspend fun flingIfPossible(
+        nestedScrollDispatcher: NestedScrollDispatcher
+    ) = coroutineScope {
         val velocity = velocityTracker.calculateVelocity()
         launch {
             _scrollX.animateDecay(
-                velocity.x / 2f,
+                velocity.x,
                 exponentialDecay(),
             )
         }
         launch {
-            _scrollY.animateDecay(
-                velocity.y / 2f,
+            val parentConsumed = nestedScrollDispatcher.dispatchPreFling(
+                available = Velocity(0f, velocity.y)
+            )
+            val animationResult = _scrollY.animateDecay(
+                velocity.y - parentConsumed.y,
                 exponentialDecay(),
             )
+            nestedScrollDispatcher.coroutineScope.launch {
+                nestedScrollDispatcher.dispatchPostFling(
+                    consumed = Velocity(0f, velocity.y - animationResult.endState.velocity),
+                    available = Velocity(0f, animationResult.endState.velocity),
+                )
+            }
         }
     }
 

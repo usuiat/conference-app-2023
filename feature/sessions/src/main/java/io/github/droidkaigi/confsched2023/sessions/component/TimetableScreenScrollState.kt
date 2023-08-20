@@ -1,5 +1,8 @@
 package io.github.droidkaigi.confsched2023.sessions.component
 
+import androidx.compose.animation.core.AnimationState
+import androidx.compose.animation.core.animateDecay
+import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -11,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.unit.Velocity
 import kotlin.math.abs
 
 @Composable
@@ -64,6 +68,18 @@ class TimetableScreenScrollState(
             ): Offset {
                 return onPostScrollScreen(available)
             }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                println("*** Screen onPreFling velocity=$available")
+                val superConsumed = super.onPreFling(available)
+                return superConsumed + onPreFlingScreen(available)
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                println("*** Screen onPostFling velocity=$available")
+                val superConsumed = super.onPostFling(consumed, available)
+                return superConsumed + onPostFlingScreen(available)
+            }
         }
 
     /**
@@ -95,6 +111,52 @@ class TimetableScreenScrollState(
         } else {
             Offset.Zero
         }
+    }
+
+    private suspend fun onPreFlingScreen(availableScrollVelocity: Velocity): Velocity {
+        if (availableScrollVelocity.y >= 0f) return Velocity.Zero
+
+        return if (isSheetExpandable && !isScreenLayoutCalculating) {
+            val remainingVelocity = settleScreenOffset(
+                initialVelocity = availableScrollVelocity.y,
+                isFinished = { !isSheetExpandable },
+            )
+            Velocity(0f, remainingVelocity)
+        } else {
+            Velocity.Zero
+        }
+    }
+
+    private suspend fun onPostFlingScreen(availableScrollVelocity: Velocity): Velocity {
+        if (availableScrollVelocity.y <= 0f) return Velocity.Zero
+
+        return if (isSheetScrolled && !isScreenLayoutCalculating) {
+            val remainingVelocity = settleScreenOffset(
+                initialVelocity = availableScrollVelocity.y,
+                isFinished = { !isSheetScrolled },
+            )
+            Velocity(0f, remainingVelocity)
+        } else {
+            Velocity.Zero
+        }
+    }
+
+    private suspend fun settleScreenOffset(
+        initialVelocity: Float,
+        isFinished: (Float) -> Boolean = { false },
+    ): Float {
+        var remainingVelocity = initialVelocity
+        AnimationState(
+            initialValue = sheetScrollOffset,
+            initialVelocity = initialVelocity,
+        )
+            .animateDecay(exponentialDecay()) {
+                println("*** Screen value=$value velocity=${this.velocity}")
+                sheetScrollOffset = value
+                remainingVelocity = this.velocity
+                if (isFinished(value)) this.cancelAnimation()
+            }
+        return remainingVelocity
     }
 
     fun onHeaderPositioned(headerHeight: Float) {
